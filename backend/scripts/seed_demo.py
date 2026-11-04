@@ -1,6 +1,7 @@
 """Seed a running local instance with realistic demo tickets, through the real HTTP API.
 
-Requires the backend to run with AUTH_MODE=dev (the docker compose default).
+Requires the backend to run with AUTH_MODE=password (the docker compose default).
+Signs in as the bootstrap admin, creates the demo accounts, then acts as each of them.
 Uses only the standard library and runs on Python 3.8+, so it works from the host as is:
 
     python3 backend/scripts/seed_demo.py                 # against http://localhost:8000
@@ -13,8 +14,14 @@ skips the follow-up activity (triage, comments) for reports that already existed
 # Keeps the type hints lazy so the script runs on older system Pythons (macOS ships 3.9).
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import http.cookiejar
 import json
+import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -26,25 +33,39 @@ if not _root.startswith(("http://", "https://")):
 BASE = _root + "/api/v1"
 AGENT = "bug-intake"
 
+# Local-only credentials; they match the docker compose defaults.
+ADMIN_EMAIL = "adam@example.com"
+ADMIN_PASSWORD = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", "adam-demo-password")
+DEMO_PASSWORD = "demo-password"  # noqa: S105
+SESSION_SECRET = os.environ.get("SESSION_SECRET", "local-dev-only-session-secret-do-not-use-in-production")
+ACCOUNTS = {  # dev name -> (email, display name)
+    "alice": ("alice@example.com", "Alice Member"),
+    "bob": ("bob@example.com", "Bob Member"),
+    "tara": ("tara@example.com", "Tara Triager"),
+}
+
 # Talk to the local server directly. urllib otherwise honours system/VPN proxy settings
 # (on macOS even ones not exported as env vars), which can stall requests to localhost.
-_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+_NO_PROXY = urllib.request.ProxyHandler({})
+_plain = urllib.request.build_opener(_NO_PROXY)
+_sessions = {}  # dev name -> opener holding that user's session cookie
+_ids = {}  # dev name -> user id
 
 
 class Unreachable(Exception):
     pass
 
 
-def call(method: str, path: str, user: str, body: dict[str, Any] | None = None) -> tuple[int, Any]:
+def _send(opener: Any, method: str, path: str, headers: dict, body: Any = None) -> tuple:
     req = urllib.request.Request(  # noqa: S310 (scheme validated above)
         BASE + path,
         method=method,
         data=json.dumps(body).encode() if body is not None else None,
-        headers={"Authorization": f"Bearer dev:{user}", "Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **headers},
     )
     try:
-        with _opener.open(req, timeout=5) as res:
-            return res.status, json.load(res)
+        with opener.open(req, timeout=5) as res:
+            return res.status, (json.load(res) if res.status != 204 else None)
     except urllib.error.HTTPError as err:
         raw = err.read()
         try:
@@ -53,6 +74,39 @@ def call(method: str, path: str, user: str, body: dict[str, Any] | None = None) 
             return err.code, raw.decode(errors="replace")[:200]
     except (urllib.error.URLError, OSError) as err:  # refused, DNS, timeout
         raise Unreachable(f"{method} {BASE + path}: {getattr(err, 'reason', err)}") from err
+
+
+def _b64(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def agent_token(user_id: str, agent: str) -> str:
+    """A session token carrying the agent claim, signed like the server does (local demo only)."""
+    head = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    claims = {"sub": user_id, "iss": "ticket-intake", "exp": int(time.time()) + 300, "act": {"sub": agent}}
+    signing_input = head + "." + _b64(json.dumps(claims).encode())
+    sig = hmac.new(SESSION_SECRET.encode(), signing_input.encode(), hashlib.sha256).digest()
+    return signing_input + "." + _b64(sig)
+
+
+def login(user: str, email: str, password: str) -> tuple:
+    opener = urllib.request.build_opener(
+        _NO_PROXY, urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
+    )
+    status, res = _send(opener, "POST", "/auth/login", {}, {"email": email, "password": password})
+    if status == 200:
+        _sessions[user] = opener
+        _ids[user] = res["id"]
+    return status, res
+
+
+def call(
+    method: str, path: str, user: str, body: dict[str, Any] | None = None, agent: str | None = None
+) -> tuple:
+    if agent:
+        headers = {"Authorization": "Bearer " + agent_token(_ids[user], agent)}
+        return _send(_plain, method, path, headers, body)
+    return _send(_sessions[user], method, path, {}, body)
 
 
 @dataclass
@@ -74,6 +128,11 @@ class Report:
 
 def via_agent(user: str) -> str:
     return f"{user}:agent:{AGENT}"
+
+
+def split_reporter(reporter: str) -> tuple:
+    user, _, rest = reporter.partition(":agent:")
+    return user, (rest or None)
 
 
 REPORTS: list[Report] = [
@@ -247,19 +306,33 @@ REPORTS: list[Report] = [
 
 def main() -> int:
     print(f"Seeding demo tickets into {BASE} ...", flush=True)
-    status, me = call("GET", "/me", "alice")
+    status, res = login("adam", ADMIN_EMAIL, ADMIN_PASSWORD)
     if status != 200:
-        print(f"The API answered HTTP {status} for a dev user: {me}")
-        print("Is the backend running with AUTH_MODE=dev (the docker compose default)?")
+        print(f"Could not sign in as {ADMIN_EMAIL}: HTTP {status} {res}")
+        print("Is the backend running with AUTH_MODE=password and the default BOOTSTRAP_ADMIN_PASSWORD?")
+        print("If the database holds data from before sign-in existed, run: make reset-db && make up")
         return 1
 
-    # Users exist in the app once they've used it; needed for assignment.
-    for user in ("alice", "bob", "tara", "adam"):
-        call("GET", "/me", user)
+    for user, (email, name) in ACCOUNTS.items():
+        status, res = call(
+            "POST", "/users", "adam", {"email": email, "name": name, "password": DEMO_PASSWORD}
+        )
+        if status not in (201, 409):  # 409: created by an earlier run
+            print(f"  ! could not create {email}: HTTP {status} {res}")
+            return 1
+        status, res = login(user, email, DEMO_PASSWORD)
+        if status != 200:
+            print(f"  ! could not sign in as {email}: HTTP {status} {res}")
+            return 1
+    status, res = call("PUT", f"/users/{_ids['tara']}/role", "adam", {"role": "triager"})
+    if status != 200:
+        print(f"  ! could not make tara a triager: HTTP {status} {res}")
+        return 1
 
     created = skipped = 0
     for report in REPORTS:
-        status, res = call("POST", "/tickets", report.reporter, {**report.body, "request_key": report.key})
+        user, agent = split_reporter(report.reporter)
+        status, res = call("POST", "/tickets", user, {**report.body, "request_key": report.key}, agent)
         if status not in (200, 201):
             print(f"  ! {report.body['title']}: HTTP {status} {res}")
             continue
@@ -273,17 +346,20 @@ def main() -> int:
         for step in report.steps:
             path = f"/tickets/{ticket['number']}"
             if step.kind == "patch":
-                status, res = call("PATCH", path, step.user, {"version": version, **step.payload})
+                fields = {k: (_ids["tara"] if v == "dev-tara" else v) for k, v in step.payload.items()}
+                status, res = call("PATCH", path, step.user, {"version": version, **fields})
                 if status == 200:
                     version = res["version"]
             else:
                 status, res = call("POST", f"{path}/comments", step.user, {"body": step.payload})
             if status not in (200, 201):
                 print(f"    ! {step.kind} by {step.user}: HTTP {status} {res}")
-        who = f"{report.reporter.split(':')[0]}{' via agent' if ':agent:' in report.reporter else ''}"
+        who = f"{user}{' via agent' if agent else ''}"
         print(f"  + #{ticket['number']:<3} {ticket['title']}  ({who})", flush=True)
 
     print(f"\nDone: {created} created, {skipped} already existed. Open http://localhost:5173")
+    print(f"Sign in as {ADMIN_EMAIL} / {ADMIN_PASSWORD} (admin), tara@example.com (triager),")
+    print(f"or alice@example.com / bob@example.com (members), password {DEMO_PASSWORD}.")
     return 0
 
 
