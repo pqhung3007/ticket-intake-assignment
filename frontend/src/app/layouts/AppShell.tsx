@@ -1,6 +1,19 @@
-import { Bug, Info, ListTodo, Menu, Monitor, Moon, Plus, ShieldCheck, Sun } from 'lucide-react'
+import {
+  Bug,
+  House,
+  Info,
+  ListTodo,
+  LogOut,
+  Menu,
+  Monitor,
+  Moon,
+  Plus,
+  ShieldCheck,
+  Sun,
+  UserRound,
+} from 'lucide-react'
 import { Suspense } from 'react'
-import { NavLink, Outlet } from 'react-router'
+import { NavLink, Outlet, useNavigate } from 'react-router'
 
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -16,7 +29,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Skeleton } from '@/components/ui/skeleton'
-import { DevUserSwitcher, useCurrentUser } from '@/features/auth'
+import { useCurrentUser, useLogout } from '@/features/auth'
 import { cn, initials } from '@/lib/utils'
 
 import { useTheme } from '../theme'
@@ -30,9 +43,10 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
+  { to: '/', label: 'Home', icon: House, end: true },
   { to: '/tickets', label: 'Tickets', icon: ListTodo, end: true },
   { to: '/tickets/new', label: 'Report a bug', icon: Plus },
-  { to: '/admin/roles', label: 'Roles', icon: ShieldCheck, adminOnly: true },
+  { to: '/admin/roles', label: 'Members', icon: ShieldCheck, adminOnly: true },
   { to: '/about', label: 'How it works', icon: Info },
 ]
 
@@ -105,6 +119,8 @@ function MobileNav() {
 function UserMenu() {
   const { data: me, isPending } = useCurrentUser()
   const { theme, setTheme } = useTheme()
+  const logout = useLogout()
+  const navigate = useNavigate()
   if (isPending) return <Skeleton className="size-8 rounded-full" />
   const label = me?.name ?? me?.email ?? 'Account'
 
@@ -129,6 +145,10 @@ function UserMenu() {
           )}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => void navigate('/account')}>
+          <UserRound aria-hidden /> Account
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">Theme</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={theme} onValueChange={(v) => setTheme(v as typeof theme)}>
           <DropdownMenuRadioItem value="light">
@@ -141,6 +161,10 @@ function UserMenu() {
             <Monitor aria-hidden /> System
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => logout.mutate()}>
+          <LogOut aria-hidden /> Sign out
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -169,7 +193,6 @@ export function AppShell() {
             <Brand />
           </div>
           <div className="ml-auto flex items-center gap-3">
-            <DevUserSwitcher />
             <UserMenu />
           </div>
         </header>

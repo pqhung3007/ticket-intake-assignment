@@ -1,25 +1,7 @@
 import createClient, { type Middleware } from 'openapi-fetch'
 
-import { env } from '@/config/env'
-import { safeStorage } from '@/lib/storage'
-
 import { ApiError } from './errors'
 import type { paths } from './schema.gen'
-
-export const DEV_USER_STORAGE_KEY = 'ticket-intake.dev-user'
-
-/**
- * In production the N0 platform authenticates the browser session; requests are same-origin
- * and carry no app-managed credentials. In local development we send a fixed dev identity.
- */
-const devAuth: Middleware = {
-  onRequest({ request }) {
-    if (env.devAuth) {
-      request.headers.set('Authorization', `Bearer dev:${safeStorage.get(DEV_USER_STORAGE_KEY) ?? 'alice'}`)
-    }
-    return request
-  },
-}
 
 /** Turn non-2xx responses into ApiError so TanStack Query sees a rejected promise. */
 const throwOnError: Middleware = {
@@ -43,7 +25,7 @@ const throwOnError: Middleware = {
 }
 
 export const api = createClient<paths>({ baseUrl: '', credentials: 'same-origin' })
-api.use(devAuth, throwOnError)
+api.use(throwOnError)
 
 /** openapi-fetch returns {data, error}; with throwOnError, data is always present on success. */
 export function unwrap<T>(result: { data?: T }): T {

@@ -1,3 +1,5 @@
-export { authKeys, useCurrentUser } from './api/queries'
-export { DevUserSwitcher } from './components/DevUserSwitcher'
+export { authKeys, useCurrentUser, useLogout } from './api/queries'
+export { RequireAuth } from './components/RequireAuth'
 export { RequireRole } from './components/RequireRole'
+export { AccountPage } from './pages/AccountPage'
+export { LoginPage } from './pages/LoginPage'

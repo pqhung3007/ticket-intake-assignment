@@ -1,7 +1,8 @@
 import { lazy } from 'react'
-import { createBrowserRouter, Navigate } from 'react-router'
+import { createBrowserRouter } from 'react-router'
 
-import { RequireRole } from '@/features/auth'
+import { AccountPage, LoginPage, RequireAuth, RequireRole } from '@/features/auth'
+import { HomePage } from '@/features/home'
 
 import { RouteErrorBoundary } from './ErrorBoundary'
 import { AppShell } from './layouts/AppShell'
@@ -16,11 +17,16 @@ const RolesPage = lazy(() => import('@/features/users').then((m) => ({ default: 
 const AboutPage = lazy(() => import('@/features/about').then((m) => ({ default: m.AboutPage })))
 
 export const router = createBrowserRouter([
+  { path: 'login', element: <LoginPage />, errorElement: <RouteErrorBoundary /> },
   {
-    element: <AppShell />,
+    element: (
+      <RequireAuth>
+        <AppShell />
+      </RequireAuth>
+    ),
     errorElement: <RouteErrorBoundary />,
     children: [
-      { index: true, element: <Navigate to="/tickets" replace /> },
+      { index: true, element: <HomePage /> },
       { path: 'tickets', element: <TicketListPage /> },
       { path: 'tickets/new', element: <NewTicketPage /> },
       { path: 'tickets/:number', element: <TicketDetailPage /> },
@@ -32,6 +38,7 @@ export const router = createBrowserRouter([
           </RequireRole>
         ),
       },
+      { path: 'account', element: <AccountPage /> },
       { path: 'about', element: <AboutPage /> },
       { path: '*', element: <RouteErrorBoundary /> },
     ],

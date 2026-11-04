@@ -6,8 +6,8 @@ import { PermissionMatrix } from '../components/PermissionMatrix'
 
 const PRINCIPLES = [
   {
-    title: 'Identity comes only from the platform',
-    body: 'Every request carries a token signed by N0. The app verifies it against the issuer’s published keys and never reads identity from request bodies or unsigned headers.',
+    title: 'Identity comes only from a verified session',
+    body: 'Every request carries a signed token: a platform token verified against N0’s published keys, or, with password sign-in, the app’s own httpOnly session cookie. Identity is never read from request bodies or unsigned headers, and roles are re-resolved on every request.',
   },
   {
     title: 'Agents act as the user, with less power',

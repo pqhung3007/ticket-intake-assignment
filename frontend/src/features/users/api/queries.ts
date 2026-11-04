@@ -17,6 +17,15 @@ export function useUsers(q = '', { enabled = true }: { enabled?: boolean } = {})
   })
 }
 
+export function useCreateUser() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: { email: string; name: string; password: string }) =>
+      unwrap(await api.POST('/api/v1/users', { body })),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: userKeys.all }),
+  })
+}
+
 export function useSetRole() {
   const queryClient = useQueryClient()
   return useMutation({

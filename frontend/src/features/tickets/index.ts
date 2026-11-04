@@ -1,3 +1,5 @@
+export { StatsCards } from './components/StatsCards'
+export { TicketPanel } from './components/TicketPanel'
 export { NewTicketPage } from './pages/NewTicketPage'
 export { TicketDetailPage } from './pages/TicketDetailPage'
 export { TicketListPage } from './pages/TicketListPage'

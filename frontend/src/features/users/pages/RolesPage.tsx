@@ -17,6 +17,7 @@ import type { User } from '@/lib/api/types'
 import { timeAgo } from '@/lib/utils'
 
 import { useSetRole, useUsers } from '../api/queries'
+import { CreateUserDialog } from '../components/CreateUserDialog'
 
 export function RolesPage() {
   const [search, setSearch] = useState('')
@@ -26,8 +27,9 @@ export function RolesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Roles"
-        description="Triagers can change status, assign and edit any ticket, and see confidential tickets. Admins are set at deploy time."
+        title="Members"
+        description="Create accounts and choose who can triage. Triagers can change status, assign and edit any ticket, and see confidential tickets. Admins are set at deploy time."
+        actions={<CreateUserDialog />}
       />
       <Card className="gap-0 py-0">
         <div className="border-b p-4">
@@ -58,7 +60,7 @@ export function RolesPage() {
               <EmptyState
                 icon={Users}
                 title="No members found"
-                description="Members appear here after they open the app for the first time."
+                description="Add the first member with the button above."
               />
             </div>
           ) : (
