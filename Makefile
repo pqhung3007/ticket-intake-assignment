@@ -1,5 +1,6 @@
 .DEFAULT_GOAL := help
 COMPOSE := docker compose
+PYTHON ?= python3
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -36,7 +37,7 @@ test: ## Run backend tests inside the backend container (uses a separate test da
 	$(COMPOSE) exec -e TEST_DATABASE_URL=postgresql://$${POSTGRES_USER:-tickets}:$${POSTGRES_PASSWORD:-tickets}@db:5432/tickets_test backend pytest -q
 
 seed: ## Fill the running app with realistic demo tickets (safe to re-run)
-	python3 backend/scripts/seed_demo.py http://localhost:$${API_PORT:-8000}
+	$(PYTHON) backend/scripts/seed_demo.py http://localhost:$${API_PORT:-8000}
 
 reset-db: ## DELETE all local data (drops the pgdata volume)
 	$(COMPOSE) down -v
