@@ -1,0 +1,106 @@
+# Local development stack.
+#
+#   docker compose up --build          # db + backend (hot reload) + frontend (hot reload)
+#   open http://localhost:5173          # web UI (Vite); API docs at http://localhost:8000/api/v1/docs
+#
+#   docker compose --profile prod up --build app   # the production image, as deployed to N0
+#   open http://localhost:8080
+#
+# Data lives in the named volume `pgdata` and survives `down`/`up` and rebuilds.
+# Only `docker compose down -v` deletes it.
+
+name: ticket-intake
+
+x-db-env: &db-env
+  DATABASE_URL: postgresql://${POSTGRES_USER:-tickets}:${POSTGRES_PASSWORD:-tickets}@db:5432/${POSTGRES_DB:-tickets}
+
+x-app-env: &app-env
+  <<: *db-env
+  # Local only: fixed identities (alice/bob/tara/adam) instead of platform tokens.
+  # The app refuses AUTH_MODE=dev when ENV=production.
+  AUTH_MODE: dev
+  ADMIN_EMAILS: ${ADMIN_EMAILS:-adam@example.com}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tickets}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tickets}
+      POSTGRES_DB: ${POSTGRES_DB:-tickets}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Exposed for local tools (psql, DB GUIs). 5433 avoids clashing with a host Postgres.
+      - "${DB_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      target: dev
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      ENV: development
+      PUBLIC_BASE_URL: http://localhost:${WEB_PORT:-5173}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      # Source is bind-mounted for hot reload; the virtualenv stays inside the image.
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+      - ./backend/tests:/app/tests
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    restart: unless-stopped
+    environment:
+      VITE_DEV_AUTH: "true"
+      VITE_API_PROXY: http://backend:8000
+      VITE_USE_POLLING: ${VITE_USE_POLLING:-false}
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      # Keep the image's node_modules (Linux binaries) instead of the host's.
+      - /app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # Production image (root Dockerfile): API + built UI in one container, as deployed to N0.
+  app:
+    profiles: [prod]
+    build:
+      context: .
+    environment:
+      <<: *app-env
+      # The real deployment uses ENV=production with AUTH_MODE=jwt and the N0 issuer.
+      # Locally there is no platform token, so this preview runs the same image in dev auth mode.
+      ENV: development
+      PUBLIC_BASE_URL: http://localhost:${PROD_PORT:-8080}
+    ports:
+      - "${PROD_PORT:-8080}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

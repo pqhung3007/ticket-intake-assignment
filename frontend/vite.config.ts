@@ -10,8 +10,12 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    strictPort: true,
     // In development the FastAPI backend runs separately; in production it serves this build.
-    proxy: { '/api': 'http://localhost:8000' },
+    // In docker compose the backend is reachable as http://backend:8000.
+    proxy: { '/api': process.env.VITE_API_PROXY ?? 'http://localhost:8000' },
+    // Bind-mounted sources on macOS/Windows don't emit file events inside containers.
+    watch: process.env.VITE_USE_POLLING === 'true' ? { usePolling: true, interval: 300 } : undefined,
   },
   build: {
     outDir: 'dist',
