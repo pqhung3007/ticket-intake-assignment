@@ -18,3 +18,8 @@
 
 ## Checks before committing
 - backend: `uv run ruff check`, `uv run ruff format --check`, `uv run mypy`, `uv run pytest`
+- frontend: `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`, `npm run build`
+- API types: after changing backend schemas, regenerate with
+  `cd backend && uv run python -m scripts.export_openapi > ../frontend/openapi.json && cd ../frontend && npm run gen:api`
+- shadcn/ui: the registry is unreachable from cloud sessions; components in `frontend/src/components/ui`
+  are hand-copied shadcn new-york v4 sources. Keep them unmodified apart from imports.
