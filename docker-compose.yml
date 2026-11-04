@@ -16,9 +16,12 @@ x-db-env: &db-env
 
 x-app-env: &app-env
   <<: *db-env
-  # Local only: fixed identities (alice/bob/tara/adam) instead of platform tokens.
-  # The app refuses AUTH_MODE=dev when ENV=production.
-  AUTH_MODE: dev
+  # Local only: the app owns accounts (email + password, session cookie) instead of platform tokens.
+  # The first admin is created from ADMIN_EMAILS + BOOTSTRAP_ADMIN_PASSWORD; `make seed` adds demo users.
+  # The app refuses the default SESSION_SECRET when ENV=production.
+  AUTH_MODE: password
+  SESSION_SECRET: ${SESSION_SECRET:-local-dev-only-session-secret-do-not-use-in-production}
+  BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-adam-demo-password}
   ADMIN_EMAILS: ${ADMIN_EMAILS:-adam@example.com}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
@@ -72,7 +75,6 @@ services:
       target: dev
     restart: unless-stopped
     environment:
-      VITE_DEV_AUTH: "true"
       VITE_API_PROXY: http://backend:8000
       VITE_USE_POLLING: ${VITE_USE_POLLING:-false}
     ports:
@@ -93,7 +95,7 @@ services:
     environment:
       <<: *app-env
       # The real deployment uses ENV=production with AUTH_MODE=jwt and the N0 issuer.
-      # Locally there is no platform token, so this preview runs the same image in dev auth mode.
+      # Locally there is no platform token, so this preview runs the same image with password sign-in.
       ENV: development
       PUBLIC_BASE_URL: http://localhost:${PROD_PORT:-8080}
     ports:

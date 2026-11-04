@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from sqlalchemy import delete, func, or_, select, text
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,20 @@ class UserRepository:
     async def get_granted_role(self, user_id: str) -> str | None:
         result = await self.session.execute(select(AppRole.role).where(AppRole.user_id == user_id))
         return result.scalar_one_or_none()
+
+    async def get_by_email(self, email: str) -> User | None:
+        """The password account for this email, if any (platform-seen rows are ignored)."""
+        stmt = select(User).where(func.lower(User.email) == email.lower(), User.password_hash.is_not(None))
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def create_with_password(self, user_id: str, email: str, name: str, password_hash: str) -> User:
+        user = User(id=user_id, email=email.lower(), name=name, password_hash=password_hash)
+        self.session.add(user)
+        await self.session.flush()
+        return user
+
+    async def set_password(self, user_id: str, password_hash: str) -> None:
+        await self.session.execute(update(User).where(User.id == user_id).values(password_hash=password_hash))
 
     async def get(self, user_id: str) -> User | None:
         return await self.session.get(User, user_id)

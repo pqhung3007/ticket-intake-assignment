@@ -99,11 +99,13 @@ class JwtVerifier:
         key_resolver: KeyResolver,
         audience: str | None = None,
         roles_claim: str = "roles",
+        algorithms: list[str] | None = None,
     ) -> None:
         self._issuer = issuer
         self._audience = audience
         self._key_resolver = key_resolver
         self._roles_claim = roles_claim
+        self._algorithms = algorithms or ALLOWED_ALGORITHMS
 
     async def verify(self, token: str) -> Identity:
         try:
@@ -111,7 +113,7 @@ class JwtVerifier:
             claims: dict[str, Any] = jwt.decode(
                 token,
                 key,
-                algorithms=ALLOWED_ALGORITHMS,
+                algorithms=self._algorithms,
                 issuer=self._issuer,
                 audience=self._audience,
                 leeway=5,

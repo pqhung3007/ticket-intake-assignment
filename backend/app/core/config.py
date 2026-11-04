@@ -20,6 +20,10 @@ def _csv(value: object) -> list[str]:
 
 CsvList = Annotated[list[str], NoDecode]
 
+SESSION_COOKIE = "ti_session"
+# Compose default for local use only; production refuses it.
+INSECURE_LOCAL_SECRET = "local-dev-only-session-secret-do-not-use-in-production"  # noqa: S105
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -37,8 +41,12 @@ class Settings(BaseSettings):
 
     # --- Authentication ---
     # "jwt": identity comes only from a token signed by the platform (production).
-    # "dev": fixed local identities for development; refused when env=production.
-    auth_mode: Literal["jwt", "dev"] = "jwt"
+    # "password": the app owns accounts; users sign in with email + password and get a session cookie.
+    auth_mode: Literal["jwt", "password"] = "jwt"
+    session_secret: str | None = None
+    session_ttl_minutes: int = Field(default=480, ge=5, le=60 * 24 * 30)
+    # Creates the first admin (first ADMIN_EMAILS entry) on startup if that account does not exist yet.
+    bootstrap_admin_password: str | None = None
     n0_issuer: str | None = None
     n0_jwks_url: str | None = None
     jwt_audience: str | None = None
@@ -76,8 +84,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_auth(self) -> "Settings":
-        if self.auth_mode == "dev" and self.env == "production":
-            raise ValueError("AUTH_MODE=dev is not allowed when ENV=production")
+        if self.auth_mode == "password":
+            if not self.session_secret or len(self.session_secret) < 32:
+                raise ValueError("SESSION_SECRET (32+ characters) is required when AUTH_MODE=password")
+            if self.env == "production" and self.session_secret == INSECURE_LOCAL_SECRET:
+                raise ValueError("SESSION_SECRET must be changed when ENV=production")
+            self.auth_cookie_name = self.auth_cookie_name or SESSION_COOKIE
+            if self.bootstrap_admin_password and not self.admin_emails:
+                raise ValueError("BOOTSTRAP_ADMIN_PASSWORD needs at least one ADMIN_EMAILS entry")
         if self.auth_mode == "jwt" and not self.n0_issuer:
             raise ValueError("N0_ISSUER is required when AUTH_MODE=jwt")
         if self.n0_issuer:

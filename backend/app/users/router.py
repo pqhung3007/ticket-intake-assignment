@@ -20,15 +20,7 @@ def _service(request: Request, session: AsyncSession) -> UserService:
 
 @router.get("/me", summary="The current user and their role")
 async def me(principal: CurrentPrincipal) -> MeOut:
-    return MeOut(
-        id=principal.user_id,
-        email=principal.email,
-        name=principal.name,
-        role=principal.role,
-        is_triager=principal.is_triager,
-        is_admin=principal.is_admin,
-        agent_id=principal.agent_id,
-    )
+    return MeOut.from_principal(principal)
 
 
 @router.get("/users", summary="Search workspace members who have used the app (triagers only)")

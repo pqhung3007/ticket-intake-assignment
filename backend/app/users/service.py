@@ -6,20 +6,31 @@ Role precedence (highest wins):
   member  - everyone else who is signed in to the workspace
 """
 
+import logging
+import uuid
+
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.passwords import DUMMY_HASH, hash_password, verify_password
 from app.auth.principal import Identity, Principal, Role
 from app.core.config import Settings
-from app.core.errors import Conflict, NotFound
+from app.core.errors import Conflict, NotFound, Unauthenticated
 from app.users.models import User
 from app.users.repository import UserRepository
 from app.users.schemas import UserOut
+from app.users.throttle import LoginThrottle
+
+logger = logging.getLogger(__name__)
 
 
 class UserService:
-    def __init__(self, session: AsyncSession, settings: Settings) -> None:
+    def __init__(
+        self, session: AsyncSession, settings: Settings, throttle: LoginThrottle | None = None
+    ) -> None:
         self.session = session
         self.settings = settings
+        self.throttle = throttle
         self.repo = UserRepository(session)
 
     def _is_config_admin(self, email: str | None, email_verified: bool = True) -> bool:
@@ -48,6 +59,60 @@ class UserService:
             agent_id=identity.agent_id,
             scopes=identity.scopes,
         )
+
+    async def authenticate(self, email: str, password: str) -> User:
+        """Check credentials. Every failure looks the same and costs the same."""
+        key = email.strip().lower()
+        if self.throttle:
+            self.throttle.check(key)
+        async with self.session.begin():
+            user = await self.repo.get_by_email(key)
+        # Always run one scrypt verification, so unknown emails are not distinguishable by timing.
+        ok = verify_password(password, user.password_hash if user and user.password_hash else DUMMY_HASH)
+        if not (user and ok):
+            if self.throttle:
+                self.throttle.fail(key)
+            raise Unauthenticated("Invalid email or password")
+        if self.throttle:
+            self.throttle.clear(key)
+        return user
+
+    async def create_user(self, email: str, name: str, password: str) -> UserOut:
+        try:
+            async with self.session.begin():
+                if await self.repo.get_by_email(email):
+                    raise Conflict("An account with this email already exists.")
+                user = await self.repo.create_with_password(
+                    uuid.uuid4().hex, email, name.strip(), hash_password(password)
+                )
+        except IntegrityError as exc:  # lost a race with a concurrent create
+            raise Conflict("An account with this email already exists.") from exc
+        return self._to_out(user, None)
+
+    async def change_password(self, principal: Principal, current: str, new: str) -> None:
+        async with self.session.begin():
+            user = await self.repo.get(principal.user_id)
+            stored = user.password_hash if user else None
+            if not stored or not verify_password(current, stored):
+                raise Unauthenticated("Current password is incorrect")
+            await self.repo.set_password(principal.user_id, hash_password(new))
+
+    async def bootstrap_admin(self) -> None:
+        """Create the first admin from config so a fresh deployment can sign in. Never overwrites."""
+        password = self.settings.bootstrap_admin_password
+        if not password:
+            return
+        email = self.settings.admin_emails[0]
+        try:
+            async with self.session.begin():
+                if await self.repo.get_by_email(email):
+                    return
+                await self.repo.create_with_password(
+                    uuid.uuid4().hex, email, "Administrator", hash_password(password)
+                )
+        except IntegrityError:
+            return  # another replica created it first
+        logger.info("bootstrap admin created", extra={"email": email})
 
     async def get(self, user_id: str) -> User | None:
         return await self.repo.get(user_id)

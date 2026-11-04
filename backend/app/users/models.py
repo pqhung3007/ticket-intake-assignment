@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text, func
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -18,10 +18,20 @@ class User(Base):
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     email: Mapped[str | None] = mapped_column(Text)
     name: Mapped[str | None] = mapped_column(Text)
+    # Only set for accounts created in AUTH_MODE=password; never exposed by the API.
+    password_hash: Mapped[str | None] = mapped_column(Text)
     first_seen_at: Mapped[datetime] = mapped_column(server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
-    __table_args__ = (Index("ix_users_lower_email", func.lower(email)),)
+    __table_args__ = (
+        Index("ix_users_lower_email", func.lower(email)),
+        Index(
+            "uq_users_lower_email_password",
+            func.lower(email),
+            unique=True,
+            postgresql_where=text("password_hash is not null"),
+        ),
+    )
 
 
 class AppRole(Base):

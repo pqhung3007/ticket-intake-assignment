@@ -12,7 +12,11 @@ from app.main import create_app
 
 def main() -> None:
     # Building the app does not connect to the database (that happens in the lifespan).
-    settings = Settings(database_url="postgresql://unused/unused", auth_mode="dev")
+    settings = Settings(
+        database_url="postgresql://unused/unused",
+        auth_mode="password",
+        session_secret="x" * 32,
+    )
     json.dump(create_app(settings).openapi(), sys.stdout, indent=2)
     sys.stdout.write("\n")
 

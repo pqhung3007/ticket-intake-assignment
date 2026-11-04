@@ -1,7 +1,6 @@
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from app.auth.dev import DevVerifier
 from app.auth.verifier import JwtVerifier
 from app.core.errors import Unauthenticated
 from tests.conftest import TokenFactory
@@ -61,11 +60,3 @@ async def test_token_signed_by_other_key_rejected(verifier: JwtVerifier, make_to
 async def test_garbage_rejected(verifier: JwtVerifier) -> None:
     with pytest.raises(Unauthenticated):
         await verifier.verify("not-a-jwt")
-
-
-async def test_dev_verifier() -> None:
-    dev = DevVerifier()
-    assert (await dev.verify("dev:alice")).user_id == "dev-alice"
-    assert (await dev.verify("dev:alice:agent:intake")).agent_id == "intake"
-    with pytest.raises(Unauthenticated):
-        await dev.verify("dev:mallory")

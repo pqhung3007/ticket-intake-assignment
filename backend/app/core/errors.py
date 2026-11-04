@@ -45,6 +45,11 @@ class NotFound(AppError):
     code = "not_found"
 
 
+class TooManyRequests(AppError):
+    status_code = 429
+    code = "too_many_requests"
+
+
 class Conflict(AppError):
     status_code = 409
     code = "conflict"

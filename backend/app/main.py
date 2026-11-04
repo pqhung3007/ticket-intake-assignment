@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.auth.dev import DevVerifier
+from app.auth.session import build_session_verifier
 from app.auth.verifier import JwksKeyResolver, JwtVerifier, TokenVerifier
 from app.core.config import Settings, get_settings
 from app.core.errors import register_error_handlers
@@ -24,7 +24,10 @@ from app.db.migrate import run_migrations
 from app.db.session import create_engine, create_session_factory
 from app.health.router import router as health_router
 from app.tickets.router import router as tickets_router
+from app.users.accounts_router import router as accounts_router
 from app.users.router import router as users_router
+from app.users.service import UserService
+from app.users.throttle import LoginThrottle
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +35,8 @@ API_PREFIX = "/api/v1"
 
 
 def build_verifier(settings: Settings) -> TokenVerifier:
-    if settings.auth_mode == "dev":
-        logger.warning("AUTH_MODE=dev: using fixed development identities")
-        return DevVerifier()
+    if settings.auth_mode == "password":
+        return build_session_verifier(settings)
     assert settings.n0_issuer  # guaranteed by Settings validation
     return JwtVerifier(
         issuer=settings.n0_issuer,
@@ -61,6 +63,9 @@ def create_app(
         app.state.verifier = verifier or build_verifier(settings)
         if settings.run_migrations_on_startup:
             await run_migrations(app.state.engine)
+        if settings.auth_mode == "password":
+            async with app.state.session_factory() as session:
+                await UserService(session, settings).bootstrap_admin()
         logger.info("startup complete", extra={"env": settings.env, "auth_mode": settings.auth_mode})
         try:
             yield
@@ -78,12 +83,15 @@ def create_app(
         openapi_url=f"{API_PREFIX}/openapi.json",
     )
     app.state.settings = settings
+    app.state.login_throttle = LoginThrottle()
 
     app.add_middleware(SecurityHeadersMiddleware, frame_ancestors=settings.frame_ancestors)
     app.add_middleware(RequestContextMiddleware)
     register_error_handlers(app)
 
     api = APIRouter(prefix=API_PREFIX)
+    if settings.auth_mode == "password":
+        api.include_router(accounts_router)
     api.include_router(users_router)
     api.include_router(tickets_router)
     app.include_router(api)
