@@ -26,6 +26,14 @@ if not _root.startswith(("http://", "https://")):
 BASE = _root + "/api/v1"
 AGENT = "bug-intake"
 
+# Talk to the local server directly. urllib otherwise honours system/VPN proxy settings
+# (on macOS even ones not exported as env vars), which can stall requests to localhost.
+_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+class Unreachable(Exception):
+    pass
+
 
 def call(method: str, path: str, user: str, body: dict[str, Any] | None = None) -> tuple[int, Any]:
     req = urllib.request.Request(  # noqa: S310 (scheme validated above)
@@ -35,10 +43,16 @@ def call(method: str, path: str, user: str, body: dict[str, Any] | None = None) 
         headers={"Authorization": f"Bearer dev:{user}", "Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as res:  # noqa: S310 (scheme validated above)
+        with _opener.open(req, timeout=5) as res:
             return res.status, json.load(res)
     except urllib.error.HTTPError as err:
-        return err.code, json.loads(err.read() or b"{}")
+        raw = err.read()
+        try:
+            return err.code, json.loads(raw or b"{}")
+        except ValueError:
+            return err.code, raw.decode(errors="replace")[:200]
+    except (urllib.error.URLError, OSError) as err:  # refused, DNS, timeout
+        raise Unreachable(f"{method} {BASE + path}: {getattr(err, 'reason', err)}") from err
 
 
 @dataclass
@@ -232,10 +246,11 @@ REPORTS: list[Report] = [
 
 
 def main() -> int:
+    print(f"Seeding demo tickets into {BASE} ...", flush=True)
     status, me = call("GET", "/me", "alice")
     if status != 200:
-        print(f"Cannot reach {BASE} as a dev user (HTTP {status}): {me}")
-        print("Is the stack running (docker compose up) with AUTH_MODE=dev?")
+        print(f"The API answered HTTP {status} for a dev user: {me}")
+        print("Is the backend running with AUTH_MODE=dev (the docker compose default)?")
         return 1
 
     # Users exist in the app once they've used it; needed for assignment.
@@ -266,11 +281,18 @@ def main() -> int:
             if status not in (200, 201):
                 print(f"    ! {step.kind} by {step.user}: HTTP {status} {res}")
         who = f"{report.reporter.split(':')[0]}{' via agent' if ':agent:' in report.reporter else ''}"
-        print(f"  + #{ticket['number']:<3} {ticket['title']}  ({who})")
+        print(f"  + #{ticket['number']:<3} {ticket['title']}  ({who})", flush=True)
 
     print(f"\nDone: {created} created, {skipped} already existed. Open http://localhost:5173")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Unreachable as exc:
+        print(f"Cannot reach the API: {exc}")
+        print("Is the stack running? Check with: docker compose ps")
+        raise SystemExit(1) from None
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
