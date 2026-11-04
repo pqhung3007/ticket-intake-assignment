@@ -1,7 +1,7 @@
 """Seed a running local instance with realistic demo tickets, through the real HTTP API.
 
 Requires the backend to run with AUTH_MODE=dev (the docker compose default).
-Uses only the standard library, so it runs from the host without installing anything:
+Uses only the standard library and runs on Python 3.8+, so it works from the host as is:
 
     python3 backend/scripts/seed_demo.py                 # against http://localhost:8000
     python3 backend/scripts/seed_demo.py http://host:port
@@ -9,6 +9,9 @@ Uses only the standard library, so it runs from the host without installing anyt
 Safe to re-run: every report carries a request_key, so a second run files nothing new and
 skips the follow-up activity (triage, comments) for reports that already existed.
 """
+
+# Keeps the type hints lazy so the script runs on older system Pythons (macOS ships 3.9).
+from __future__ import annotations
 
 import json
 import sys
